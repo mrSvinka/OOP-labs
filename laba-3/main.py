@@ -44,7 +44,6 @@
  - log_warn(text: str) -> None - записывает логи с LogLevel = LogLevel.WARN
  - log_error(text: str) -> None - записывает логи с LogLevel = LogLevel.ERROR
 
-
 9. Продемонстрировать работу спроектированной системы классов
 '''
 
@@ -180,7 +179,6 @@ class SyslogHandler(ILogHandler):
 
     def handle(self, log_level: LogLevel, text: str) -> None:
         '''Форматирует сообщение в стиле syslog и отправляет'''
-        # Примитивный syslog-формат: < PRI > version ...
         # Уровни важности: INFO=6, WARN=4, ERROR=3 (user-level)
         priority_map = {
             LogLevel.INFO: 14,    # user.info
@@ -207,15 +205,14 @@ class FtpHandler(ILogHandler):
             import ftplib
             with ftplib.FTP(self._host) as ftp:
                 ftp.login(self._username, self._password)
-                # Предполагаем, что remote_path указывает на файл, в который можно писать
-                # Используем команду APPE для добавления
+                # remote_path указывает на файл, в который можно писать
+                # у APPE для добавления
                 with open('temp_log.txt', 'w') as tmp:
                     tmp.write(text + '\n')
                 with open('temp_log.txt', 'rb') as f:
                     ftp.storbinary(f'APPE {self._remote_path}', f)
                 os.remove('temp_log.txt')
         except Exception as e:
-            # В реальном проекте нужно логировать ошибки
             pass
 
 
@@ -269,119 +266,76 @@ class Logger:
         self.log(LogLevel.ERROR, text)
 
 
-def test_logger_basic():
-    print("Тестирование базового функционала Logger")
+def demo_logger():
+    """Компактная демонстрация работы системы логирования."""
+    print("=== Демонстрация системы логирования ===\n")
 
-    # Создаём обработчики
-    console = ConsoleHandler()
-    file_handler = FileHandler('test.log')
-
-    # Форматтер
-    formatter = DefaultFormatter()
-
-    # Логгер с одним форматтером и двумя обработчиками
-    logger = Logger(
-        formatters=[formatter],
-        handlers=[console, file_handler]
+    # 1. Базовая запись в консоль и файл
+    print("1. Базовая запись в консоль и файл:")
+    logger_basic = Logger(
+        formatters=[DefaultFormatter()],
+        handlers=[ConsoleHandler(), FileHandler('demo.log')]
     )
+    logger_basic.log_info("Информация")
+    logger_basic.log_warn("Предупреждение")
+    logger_basic.log_error("Ошибка")
+    print("   → Проверьте файл demo.log\n")
 
-    print("Запись сообщений:")
-    logger.log_info("Это информационное сообщение")
-    logger.log_warn("Предупреждение")
-    logger.log_error("Ошибка")
-
-    print("Проверьте файл test.log\n")
-
-
-def test_filters():
-    print("Тестирование фильтров")
-
-    console = ConsoleHandler()
-    formatter = DefaultFormatter()
-
-    # Фильтры
-    level_filter = LevelFilter(LogLevel.ERROR, LogLevel.WARN)          # только ERROR и WARN
-    simple_filter = SimpleLogFilter("важно")                           # сообщения со словом "важно"
-    regex_filter = ReLogFilter(r"\d{3}")                               # сообщения, содержащие трёхзначное число
-
-    logger1 = Logger(
-        filters=[level_filter],
-        formatters=[formatter],
-        handlers=[console]
+    # 2. Фильтрация по уровню (только ERROR и WARN)
+    print("2. Фильтрация по уровню (только ERROR/WARN):")
+    logger_level = Logger(
+        filters=[LevelFilter(LogLevel.ERROR, LogLevel.WARN)],
+        formatters=[DefaultFormatter()],
+        handlers=[ConsoleHandler()]
     )
-    logger2 = Logger(
-        filters=[simple_filter],
-        formatters=[formatter],
-        handlers=[console]
+    logger_level.log_info("INFO не выводится")
+    logger_level.log_warn("WARN выводится")
+    logger_level.log_error("ERROR выводится")
+    print()
+
+    # 3. Фильтрация по подстроке
+    print("3. Фильтрация по подстроке 'важно':")
+    logger_simple = Logger(
+        filters=[SimpleLogFilter("важно")],
+        formatters=[DefaultFormatter()],
+        handlers=[ConsoleHandler()]
     )
-    logger3 = Logger(
-        filters=[regex_filter],
-        formatters=[formatter],
-        handlers=[console]
+    logger_simple.log_info("обычное сообщение")
+    logger_simple.log_info("важное сообщение")
+    print()
+
+    # 4. Фильтрация по регулярному выражению (трёхзначное число)
+    print("4. Фильтрация по regex (трёхзначное число):")
+    logger_regex = Logger(
+        filters=[ReLogFilter(r"\d{3}")],
+        formatters=[DefaultFormatter()],
+        handlers=[ConsoleHandler()]
     )
+    logger_regex.log_info("код 42")
+    logger_regex.log_info("код 123")
+    logger_regex.log_error("ошибка 500")
+    print()
 
-    print("Логгер с фильтром по уровню (только ERROR/WARN):")
-    logger1.log_info("info сообщение")        # не должно вывестись
-    logger1.log_warn("warn сообщение")        # выведется
-    logger1.log_error("error сообщение")      # выведется
-
-    print("\nЛоггер с фильтром по подстроке 'важно':")
-    logger2.log_info("обычное сообщение")
-    logger2.log_info("важное сообщение")
-
-    print("\nЛоггер с regex-фильтром (трёхзначное число):")
-    logger3.log_info("код 42")
-    logger3.log_info("код 123")
-    logger3.log_error("ошибка 500")
-
-
-def test_handlers():
-    print("Тестирование различных обработчиков (заглушки)")
-
-    # Для демонстрации используем только консоль, т.к. другие требуют внешних ресурсов
-    console = ConsoleHandler()
-    # SocketHandler попытается отправить UDP на localhost:514 (можно проверить netcat)
-    socket_handler = SocketHandler('127.0.0.1', 9999)  # нестандартный порт, чтобы не мешать syslog
-    # FileHandler
-    file_handler = FileHandler('multi_test.log')
-    # SyslogHandler использует SocketHandler
-    syslog_handler = SyslogHandler('127.0.0.1', 9999)
-    # FtpHandler - заглушка (попытается соединиться, но если нет сервера, просто выбросит исключение)
-    # Чтобы не замедлять тест, закомментируем или сделаем try
-    # ftp_handler = FtpHandler('localhost', 'user', 'pass', '/log.txt')
-
-    formatter = DefaultFormatter()
-
-    logger = Logger(
-        formatters=[formatter],
-        handlers=[console, socket_handler, file_handler, syslog_handler]
+    # 5. Несколько обработчиков одновременно (консоль + файл + сокет)
+    print("5. Несколько обработчиков (консоль, файл, UDP-сокет):")
+    logger_multi = Logger(
+        formatters=[DefaultFormatter()],
+        handlers=[
+            ConsoleHandler(),
+            FileHandler('multi_demo.log'),
+            SocketHandler('127.0.0.1', 9999)  # можно проверить netcat
+        ]
     )
+    logger_multi.log_info("Сообщение для всех обработчиков")
+    print("   → Проверьте файл multi_demo.log и UDP-порт 9999\n")
 
-    logger.log_info("Тест множественных обработчиков")
-    print("Проверьте файл multi_test.log, а также UDP-порт 9999 (если слушает netcat)")
-
-
-def test_edge_cases_logger():
-    print("Крайние случаи: пустые списки, отсутствие фильтров и т.д.")
-
-    # Логгер без фильтров, форматтеров и обработчиков (ничего не произойдёт)
-    logger_empty = Logger()
-    logger_empty.log_info("Это сообщение никуда не попадёт")
-
-    # Логгер только с обработчиком
-    console = ConsoleHandler()
-    logger_min = Logger(handlers=[console])
-    logger_min.log_info("Сообщение без форматирования")  # выведется как есть
-
-    # Логгер с форматтером, но без обработчиков
-    formatter = DefaultFormatter()
-    logger_no_handlers = Logger(formatters=[formatter])
-    logger_no_handlers.log_info("Это сообщение будет отформатировано, но не выведено")
+    # 6. Крайние случаи
+    print("6. Крайние случаи:")
+    Logger().log_info("Нет обработчиков → ничего не выведется")
+    Logger(handlers=[ConsoleHandler()]).log_info("Только обработчик (без форматтера) → сырое сообщение")
+    print()
 
 
 if __name__ == "__main__":
-    test_logger_basic()
-    test_filters()
-    test_handlers()
-    test_edge_cases_logger()
-    print("Тестирование системы логирования завершено")
+    demo_logger()
+    print("Демонстрация завершена.")
