@@ -1,4 +1,15 @@
 '''
+
+@abc.abstractmethod - это декоратор из модуля abc (Abstract Base Classes), который помечает метод как абстрактный.
+Это означает, что класс, содержащий такой метод, становится абстрактным и не может быть инстанциирован напрямую. Подклассы обязаны переопределить этот метод.
+
+match - это метод, который проверяет, подходит ли сообщение под условие фильтра.
+
+format - это метод, который преобразует исходное сообщение в строку с дополнительной информацией .
+
+АТРИБУТ
+
+
 Лабораторная работа 3 (Система логирования)
 
 Создать систему логирования, применяя композицию (агрегацию),
@@ -58,8 +69,12 @@ import os
 from typing import List, Optional, Union
 
 
+
+BUFFER_MAX = 777
+
+# ТИПЫ
 class LogLevel(enum.Enum):
-    '''Перечислитель уровней логирования'''
+    '''Уровни логирования'''
     INFO = 'INFO'
     WARN = 'WARN'
     ERROR = 'ERROR'
@@ -70,7 +85,7 @@ class ILogFilter(abc.ABC):
 
     @abc.abstractmethod
     def match(self, log_level: LogLevel, text: str) -> bool:
-        '''Проверяет, проходит ли сообщение через фильтр'''
+        '''Проходит ли сообщение через фильтр'''
         pass
 
 
@@ -92,8 +107,9 @@ class ILogFormatter(abc.ABC):
         pass
 
 
+# ФИЛЬТРЫ
 class SimpleLogFilter(ILogFilter):
-    '''Фильтр по вхождению подстроки (паттерна) в текст сообщения'''
+    '''Фильтр по вхождению подстроки в текст'''
 
     def __init__(self, pattern: str) -> None:
         self._pattern = pattern
@@ -103,16 +119,26 @@ class SimpleLogFilter(ILogFilter):
         return self._pattern in text
 
 
+###################################################################ЗДЕСЯ ИЗМЕНЕНИЕ##################################################################
 class ReLogFilter(ILogFilter):
     '''Фильтр по регулярному выражению'''
 
     def __init__(self, pattern: str) -> None:
-        self._regex = re.compile(pattern)
+        self._regex = None
+        try:
+            self._regex = re.compile(pattern)
+        except re.error:
+            pass
 
     def match(self, log_level: LogLevel, text: str) -> bool:
-        '''Возвращает True, если регулярное выражение найдено в тексте'''
-        return bool(self._regex.search(text))
-
+        '''Регулярное выражение найдено в тексте'''
+        if self._regex is None:
+            return False
+        try:
+            return bool(self._regex.search(text))
+        except Exception:
+            return False
+#################################################################################################################################################################
 
 class LevelFilter(ILogFilter):
     '''Фильтр по уровню логирования'''
@@ -121,10 +147,44 @@ class LevelFilter(ILogFilter):
         self._levels = set(levels)
 
     def match(self, log_level: LogLevel, text: str) -> bool:
-        '''Возвращает True, если уровень сообщения присутствует в наборе'''
+        '''Уровень сообщения присутствует в наборе'''
         return log_level in self._levels
 
 
+################################################################ЕЩЕ МЕНЯЛ##############################################################################
+class OrderedHandler(ILogHandler):
+    '''Сообщения в порядке: ERROR, WARN, INFO'''
+
+    def __init__(self, target_handler: ILogHandler, max_size: int = 100) -> None:
+
+        self._target = target_handler  # переданы отсортированные сообщения
+        self._buffer = []  # список кортежей (priority, log_level, text)
+        self._max_size = max_size
+
+        self._priority_map = {
+            LogLevel.ERROR: 0,
+            LogLevel.WARN: 1,
+            LogLevel.INFO: 2
+        }
+
+    def handle(self, log_level: LogLevel, text: str) -> None:
+        '''Добавляет сообщение в буфер с приоритетом'''
+
+        self._buffer.append((self._priority_map[log_level], log_level, text))
+        if len(self._buffer) >= self._max_size:
+            self.flush()
+
+    def flush(self) -> None:
+        '''Сортирует буфер по приоритету, передаёт всё обработчику'''
+        self._buffer.sort(key=lambda x: x[0])  # сортировка по приоритету
+        for _, level, msg in self._buffer:
+            self._target.handle(level, msg)
+        self._buffer.clear()  # очистка буфера
+
+
+########################################################################################################################################################################
+
+# ОБРАБОТЧИКИ
 class ConsoleHandler(ILogHandler):
     '''Вывод логов в консоль (stdout)'''
 
@@ -151,39 +211,38 @@ class FileHandler(ILogHandler):
 
 
 class SocketHandler(ILogHandler):
-    '''Отправка логов через UDP-сокет'''
+    '''Отправка через UDP-сокет'''
 
     def __init__(self, host: str = '127.0.0.1', port: int = 514) -> None:
         self._host = host
         self._port = port
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # Создаём UDP-сокет
 
     def handle(self, log_level: LogLevel, text: str) -> None:
         '''Отправляет сообщение как UDP-дейтаграмму'''
         try:
             self._socket.sendto(text.encode('utf-8'), (self._host, self._port))
-        except Exception as e:
-            # В реальном коде можно логировать ошибку, но здесь просто игнорируем
+        except Exception:
             pass
 
     def __del__(self):
-        '''Закрываем сокет при удалении объекта'''
+        '''При удалении объекта, закрывает сокет'''
         self._socket.close()
 
 
 class SyslogHandler(ILogHandler):
-    '''Отправка логов в системный syslog.Через UDP на localhost:514 (стандартный порт syslog)'''
+    '''отправка логов в формате syslog'''
 
     def __init__(self, host: str = '127.0.0.1', port: int = 514) -> None:
         self._handler = SocketHandler(host, port)  # используем тот же UDP
 
     def handle(self, log_level: LogLevel, text: str) -> None:
         '''Форматирует сообщение в стиле syslog и отправляет'''
-        # Уровни важности: INFO=6, WARN=4, ERROR=3 (user-level)
+        # Уровни важности
         priority_map = {
-            LogLevel.INFO: 14,    # user.info
-            LogLevel.WARN: 12,     # user.warn
-            LogLevel.ERROR: 11     # user.err
+            LogLevel.INFO: 14,  # user.info
+            LogLevel.WARN: 12,  # user.warn
+            LogLevel.ERROR: 11  # user.err
         }
         pri = priority_map[log_level]
         syslog_msg = f"<{pri}>1 {text}"
@@ -191,7 +250,7 @@ class SyslogHandler(ILogHandler):
 
 
 class FtpHandler(ILogHandler):
-    '''Отправка логов на FTP-сервер (упрощённо, запись в файл на сервере)'''
+    '''Отправка логов на FTP-сервер'''
 
     def __init__(self, host: str, username: str, password: str, remote_path: str) -> None:
         self._host = host
@@ -200,34 +259,40 @@ class FtpHandler(ILogHandler):
         self._remote_path = remote_path
 
     def handle(self, log_level: LogLevel, text: str) -> None:
-        '''Устанавливает FTP-соединение и дописывает сообщение в удалённый файл. Для упрощения используем ftplib, но в демо можно заменить заглушкой'''
+        '''Устанавливает FTP-соединение, дописывает сообщение'''
         try:
             import ftplib
-            with ftplib.FTP(self._host) as ftp:
+            with ftplib.FTP(self._host) as ftp:  # Создаём временный файл с сообщением
                 ftp.login(self._username, self._password)
-                # remote_path указывает на файл, в который можно писать
-                # у APPE для добавления
-                with open('temp_log.txt', 'w') as tmp:
+                with open('temp_log.txt', 'w') as tmp:  # Подключаемся к FTP
                     tmp.write(text + '\n')
-                with open('temp_log.txt', 'rb') as f:
+                with open('temp_log.txt', 'rb') as f:  # Открываем временный файл и передаём его в удалённый
                     ftp.storbinary(f'APPE {self._remote_path}', f)
-                os.remove('temp_log.txt')
-        except Exception as e:
+                os.remove('temp_log.txt')  # Удаляем временный файл
+        except Exception:
             pass
 
 
+# ФОРМАТТЕРЫ
+##################################################################ТУТА ИЗМЕНЕНИЕ####################################################################
 class DefaultFormatter(ILogFormatter):
-    '''Форматтер, добавляющий уровень и временную метку'''
+    '''Уровень, дата и время, текст'''
+
+    def __init__(self, date_format: str = "%Y.%m.%d %H:%M:%S") -> None:  # по умолчанию
+        self._date_format = date_format
 
     def format(self, log_level: LogLevel, text: str) -> str:
-        '''Возвращает строку вида [INFO] [2025.02.17 14:35:22] сообщение'''
+        '''Возвращает строку вида [<LEVEL>] [<YYYY.MM.DD HH:MM:SS>] <text>'''
         now = datetime.datetime.now()
-        timestamp = now.strftime("%Y.%m.%d %H:%M:%S")
+        timestamp = now.strftime(self._date_format)
         return f"[{log_level.value}] [{timestamp}] {text}"
 
 
+#################################################################################################################################################################
+
+# JCYJDYJQ RKFCC
 class Logger:
-    '''Основной класс логгера. Принимает списки фильтров, форматтеров и обработчиков'''
+    '''Получает списки фильтров, форматтеров и обработчиков'''
 
     def __init__(self,
                  filters: Optional[List[ILogFilter]] = None,
@@ -238,13 +303,13 @@ class Logger:
         self._handlers = handlers if handlers is not None else []
 
     def log(self, log_level: LogLevel, text: str) -> None:
-        '''Пропускает сообщение через фильтры, форматтеры и отправляет обработчикам. Если фильтры не пусты, все они должны вернуть True'''
+        '''Пропускает сообщение через фильтры, форматтеры. отправляет обработчикам'''
         # Фильтрация
         for f in self._filters:
             if not f.match(log_level, text):
-                return  # сообщение отброшено
+                return
 
-        # Форматирование (последовательное применение)
+                # Форматирование
         formatted_text = text
         for fmt in self._formatters:
             formatted_text = fmt.format(log_level, formatted_text)
@@ -267,21 +332,16 @@ class Logger:
 
 
 def demo_logger():
-    """Компактная демонстрация работы системы логирования."""
-    print("=== Демонстрация системы логирования ===\n")
-
-    # 1. Базовая запись в консоль и файл
-    print("1. Базовая запись в консоль и файл:")
+    print("1.Запись в консоль и файл:")
     logger_basic = Logger(
         formatters=[DefaultFormatter()],
         handlers=[ConsoleHandler(), FileHandler('demo.log')]
     )
     logger_basic.log_info("Информация")
     logger_basic.log_warn("Предупреждение")
-    logger_basic.log_error("Ошибка")
+    logger_basic.log_error("Ошибкаааааааа")
     print("   → Проверьте файл demo.log\n")
 
-    # 2. Фильтрация по уровню (только ERROR и WARN)
     print("2. Фильтрация по уровню (только ERROR/WARN):")
     logger_level = Logger(
         filters=[LevelFilter(LogLevel.ERROR, LogLevel.WARN)],
@@ -293,8 +353,7 @@ def demo_logger():
     logger_level.log_error("ERROR выводится")
     print()
 
-    # 3. Фильтрация по подстроке
-    print("3. Фильтрация по подстроке 'важно':")
+    print("3. Фильтрация по подстроке:")
     logger_simple = Logger(
         filters=[SimpleLogFilter("важно")],
         formatters=[DefaultFormatter()],
@@ -304,38 +363,59 @@ def demo_logger():
     logger_simple.log_info("важное сообщение")
     print()
 
-    # 4. Фильтрация по регулярному выражению (трёхзначное число)
-    print("4. Фильтрация по regex (трёхзначное число):")
+    print("4.Фильтрация по регулярному выражению:")
     logger_regex = Logger(
         filters=[ReLogFilter(r"\d{3}")],
+        #filters=[ReLogFilter(r"\\///[.\\dsahedthterashated648nds452..d{3}")],
         formatters=[DefaultFormatter()],
         handlers=[ConsoleHandler()]
     )
-    logger_regex.log_info("код 42")
+    logger_regex.log_info("код 777")
     logger_regex.log_info("код 123")
-    logger_regex.log_error("ошибка 500")
+    logger_regex.log_error("ошибка 228")
     print()
 
-    # 5. Несколько обработчиков одновременно (консоль + файл + сокет)
     print("5. Несколько обработчиков (консоль, файл, UDP-сокет):")
     logger_multi = Logger(
         formatters=[DefaultFormatter()],
         handlers=[
             ConsoleHandler(),
             FileHandler('multi_demo.log'),
-            SocketHandler('127.0.0.1', 9999)  # можно проверить netcat
+            SocketHandler('127.0.0.1', 9999)
         ]
     )
-    logger_multi.log_info("Сообщение для всех обработчиков")
+    logger_multi.log_info("Сообщение")
     print("   → Проверьте файл multi_demo.log и UDP-порт 9999\n")
 
-    # 6. Крайние случаи
-    print("6. Крайние случаи:")
+    print("7.ERROR, WARN, INFO")
+    ordered_handler = OrderedHandler(ConsoleHandler(), max_size=BUFFER_MAX)
+    logger_ordered = Logger(
+        formatters=[DefaultFormatter()],
+        handlers=[ordered_handler]
+    )
+    logger_ordered.log_error("Ошибкааа")
+    logger_ordered.log_info("Информация")
+    logger_ordered.log_warn("Предупреждение")
+    logger_ordered.log_info("Информулина")
+    logger_ordered.log_error("Ошибкаааааа")
+    logger_ordered.log_info("Информейшен")
+
+
+    ordered_handler.flush()
+    print()
+
+    print("8.нестандартным форматом дат")
+    logger_timeonly = Logger(
+        formatters=[DefaultFormatter(date_format="%H:%M:%S")],
+        handlers=[ConsoleHandler()]
+    )
+    logger_timeonly.log_info("Только время")
+    print()
+
     Logger().log_info("Нет обработчиков → ничего не выведется")
-    Logger(handlers=[ConsoleHandler()]).log_info("Только обработчик (без форматтера) → сырое сообщение")
+    Logger(handlers=[ConsoleHandler()]).log_info("Только обработчик")
     print()
 
 
 if __name__ == "__main__":
     demo_logger()
-    print("Демонстрация завершена.")
