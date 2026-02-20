@@ -28,3 +28,260 @@
 7. Создать не менее двух классов, каждый из которых имеет не менее трех полей, которые при изменении свойств вызывают событие от EventHandler<PropertyChangedEventArgs> после изменения свойства и
 EventHandler<PropertyChangingEventArgs> до изменения значения свойства с возможностью отменить изменение
 '''
+
+
+
+
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Any, List, Optional, TypeVar, Generic
+
+
+# Базовые типы для событий
+TEventArgs = TypeVar('TEventArgs')
+
+
+class EventHandler(ABC, Generic[TEventArgs]):
+    '''Класс обработчика события'''
+
+    @abstractmethod
+    def handle(self, sender: object, args: TEventArgs) -> None:
+        '''Обработать событие'''
+        pass
+
+
+class EventArgs:
+    '''Класс для аргументов события'''
+    pass
+
+
+# Управление подпиской и оповещением
+class Event(Generic[TEventArgs]):
+    '''механизм подписки на событие и его вызов'''
+
+    def __init__(self) -> None:
+        self._handlers: List[EventHandler[TEventArgs]] = []
+
+    def __iadd__(self, handler: EventHandler[TEventArgs]) -> 'Event[TEventArgs]':
+        '''Подписка на событие (+=)'''
+        if handler not in self._handlers:
+            self._handlers.append(handler)
+        return self
+
+    def __isub__(self, handler: EventHandler[TEventArgs]) -> 'Event[TEventArgs]':
+        '''Отписка от события (-=)'''
+        if handler in self._handlers:
+            self._handlers.remove(handler)
+        return self
+
+    def __call__(self, sender: object, args: TEventArgs) -> None:
+        '''Оповещение всех подписчиков'''
+        for handler in self._handlers:
+            handler.handle(sender, args)
+
+
+# Аргументы для событий изменения свойств
+class PropertyChangedEventArgs(EventArgs):
+    '''Аргументы события после изменения свойства'''
+
+    def __init__(self, property_name: str) -> None:
+        self.property_name = property_name
+
+
+class PropertyChangingEventArgs(EventArgs):
+    '''Аргументы события до изменения свойства'''
+
+    def __init__(self, property_name: str, old_value: Any, new_value: Any) -> None:
+        self.property_name = property_name
+        self.old_value = old_value
+        self.new_value = new_value
+        self.can_change = True   #изменение разрешено (по умолчанию)
+
+
+# Конкретные обработчики событий
+class ConsolePropertyChangedHandler(EventHandler[PropertyChangedEventArgs]):
+    '''Вывод информации в консоль'''
+
+    def handle(self, sender: object, args: PropertyChangedEventArgs) -> None:
+        print(f"Свойство '{args.property_name}' объекта {sender} изменено.")
+
+
+class ValidatingPropertyChangingHandler(EventHandler[PropertyChangingEventArgs]):
+    '''Валидация с возможностью отмены'''
+
+    def __init__(self, forbidden_values: Optional[List[Any]] = None) -> None:
+        self.forbidden_values = forbidden_values or []
+
+    def handle(self, sender: object, args: PropertyChangingEventArgs) -> None:
+        if args.new_value in self.forbidden_values:
+            print(f"Изменение свойства '{args.property_name}' на {args.new_value} запрещено.")
+            args.can_change = False
+
+
+# Базовый класс для моделей с поддержкой событий изменения свойств
+class PropertyChangeNotifier:
+    '''События изменения свойств'''
+
+    def __init__(self) -> None:
+        self.property_changing: Event[PropertyChangingEventArgs] = Event()
+        self.property_changed: Event[PropertyChangedEventArgs] = Event()
+
+    def _set_property(self, field_name: str, field_value: Any, new_value: Any) -> bool:
+        '''Установки свойства'''
+        # Событие до изменения
+        changing_args = PropertyChangingEventArgs(field_name, field_value, new_value)
+        self.property_changing(self, changing_args)
+        if not changing_args.can_change:
+            return False
+        return True
+
+    def _notify_changed(self, property_name: str) -> None:
+        '''Вызов события после изменения'''
+        self.property_changed(self, PropertyChangedEventArgs(property_name))
+
+
+class Person(PropertyChangeNotifier):
+    '''человека со свойствами: имя, возраст, email'''
+
+    def __init__(self, name: str, year_of_birth: int, email: str) -> None:
+        super().__init__()
+        self._name = name
+        self._year_of_birth = year_of_birth
+        self._email = email
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @name.setter
+    def name(self, value: str) -> None:
+        if self._set_property('name', self._name, value):
+            self._name = value
+            self._notify_changed('name')
+
+    @property
+    def year_of_birth(self) -> int:
+        return self._year_of_birth
+
+    @year_of_birth.setter
+    def year_of_birth(self, value: int) -> None:
+        if self._set_property('year_of_birth', self._year_of_birth, value):
+            self._year_of_birth = value
+            self._notify_changed('year_of_birth')
+
+    @property
+    def email(self) -> str:
+        return self._email
+
+    @email.setter
+    def email(self, value: str) -> None:
+        if self._set_property('email', self._email, value):
+            self._email = value
+            self._notify_changed('email')
+
+    def __repr__(self) -> str:
+        return f"Person(name={self._name}, year_of_birth={self._year_of_birth}, email={self._email})"
+
+
+class Product(PropertyChangeNotifier):
+    '''Товар со свойствами: название, цена, количество'''
+
+    def __init__(self, title: str, price: float, quantity: int) -> None:
+        super().__init__()
+        self._title = title
+        self._price = price
+        self._quantity = quantity
+
+    @property
+    def title(self) -> str:
+        return self._title
+
+    @title.setter
+    def title(self, value: str) -> None:
+        if self._set_property('title', self._title, value):
+            self._title = value
+            self._notify_changed('title')
+
+    @property
+    def price(self) -> float:
+        return self._price
+
+    @price.setter
+    def price(self, value: float) -> None:
+        if self._set_property('price', self._price, value):
+            self._price = value
+            self._notify_changed('price')
+
+    @property
+    def quantity(self) -> int:
+        return self._quantity
+
+    @quantity.setter
+    def quantity(self, value: int) -> None:
+        if self._set_property('quantity', self._quantity, value):
+            self._quantity = value
+            self._notify_changed('quantity')
+
+    def __repr__(self) -> str:
+        return f"Product(title={self._title}, price={self._price}, quantity={self._quantity})"
+
+
+def test_events() -> None:
+
+    console_handler = ConsolePropertyChangedHandler()
+    year_of_birth_validator = ValidatingPropertyChangingHandler(forbidden_values=[-5, -10])
+    price_validator = ValidatingPropertyChangingHandler(forbidden_values=[-100.0, -50.0])
+
+    person = Person("Иван", 1997, "ivan@gooloogooloo.com")
+    product = Product("Офисный компьютер", 30000.0, 10)
+
+    person.property_changed += console_handler
+    person.property_changing += year_of_birth_validator
+
+    product.property_changed += console_handler
+    product.property_changing += price_validator
+
+    print("Изменение свойств Person")
+    print(f"До: {person}")
+    person.year_of_birth = 1999
+    person.year_of_birth = -5
+    person.name = "Дмитрий"
+    person.email = "OTCHISLY@gooloogooloo.com"
+    print(f"После: {person}")
+
+    print("\nИзменение свойств Product")
+    print(f"До: {product}")
+    product.price = 90000.0
+    product.price = -100.0
+    product.quantity = 5
+    product.title = "Игровой компьютер (2 ядра 2 гига, игровая видеокарта)"
+    print(f"После: {product}")
+
+    print("\nОтписка")
+    product.property_changed -= console_handler
+    product.quantity = 20
+    print("(Изменение quantity произошло, но событие не обработано)")
+
+    print(f"Product после: {product}")
+
+
+if __name__ == "__main__":
+    test_events()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
