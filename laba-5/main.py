@@ -357,7 +357,7 @@ def demonstrate() -> None:
     if auth2.is_authorized():
         print(f"Успешно. Пользователь: {auth2.current_user().name}")
 
-    print("\n7. Поиск по логину:")
+    print("\nПоиск по логину:")
     found = repo.get_by_login("ZACHOT")
     print(f"   Найден: {found.name if found else 'нет'}")
 
