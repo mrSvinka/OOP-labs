@@ -101,7 +101,7 @@
  - смена текущего пользователя
  - авторматическая авторизация при повторном заходе в программу
 """
- 
+
 import os
 import pickle
 import hashlib
@@ -112,16 +112,16 @@ from typing import Optional, Sequence, List, TypeVar, Generic
 
 # Хеширование паролей
 def hash_password(password: str) -> str:
-    """Возвращает строку вида 'salt$hash' для безопасного хранения."""
+    '''Возвращает строку вида 'salt$hash' для безопасного хранения'''
     salt = os.urandom(16).hex()
     hash_obj = hashlib.sha256((salt + password).encode())
     return f"{salt}${hash_obj.hexdigest()}"
 
 
 def verify_password(plain_password: str, hashed: str) -> bool:
-    """Проверяет, соответствует ли открытый пароль сохранённому хешу."""
+    '''Соответствует ли открытый пароль сохранённому хешу'''
     try:
-        salt, hash_value = hashed.split('$')
+        salt, hash_value = hashed.split("$")
     except ValueError:
         return False
     check_hash = hashlib.sha256((salt + plain_password).encode()).hexdigest()
@@ -130,7 +130,7 @@ def verify_password(plain_password: str, hashed: str) -> bool:
 
 @dataclass
 class User:
-    """Модель пользователя. Пароль хранится в хешированном виде."""
+    '''Модель пользователя'''
     id: int
     name: str
     login: str
@@ -139,13 +139,11 @@ class User:
     address: Optional[str] = None
 
     def __lt__(self, other: 'User') -> bool:
-        """Для сортировки по имени."""
+        '''Для сортировки по имени'''
         return self.name < other.name
 
 
-# Интерфейсы репозиториев
-T = TypeVar('T')
-
+T = TypeVar('T')  #Интерфейсы репозиториев
 
 class IDataRepository(ABC, Generic[T]):
     @abstractmethod
@@ -170,8 +168,7 @@ class IUserRepository(IDataRepository[User], ABC):
 
 
 class DataRepository(IDataRepository[T], Generic[T]):
-    """Хранение в pickle-файле."""
-
+    '''Хранение'''
     def __init__(self, filename: str):
         self._filename = filename
         self._items: List[T] = []
@@ -180,13 +177,13 @@ class DataRepository(IDataRepository[T], Generic[T]):
     def _load(self) -> None:
         if os.path.exists(self._filename):
             try:
-                with open(self._filename, 'rb') as f:
+                with open(self._filename, "rb") as f:
                     self._items = pickle.load(f)
             except Exception:
                 self._items = []
 
     def _save(self) -> None:
-        with open(self._filename, 'wb') as f:
+        with open(self._filename, "wb") as f:
             pickle.dump(self._items, f)
 
     def get_all(self) -> Sequence[T]:
@@ -194,31 +191,31 @@ class DataRepository(IDataRepository[T], Generic[T]):
 
     def get_by_id(self, id: int) -> Optional[T]:
         for item in self._items:
-            if getattr(item, 'id', None) == id:
+            if getattr(item, "id", None) == id:
                 return item
         return None
 
     def add(self, item: T) -> None:
-        if hasattr(item, 'id') and item.id is not None and self.get_by_id(item.id):
-            raise ValueError(f"Элемент с id {item.id} уже существует.")
+        if hasattr(item, "id") and item.id is not None and self.get_by_id(item.id):
+            raise ValueError(f"Элемент с id {item.id} уже имеется")
         self._items.append(item)
         self._save()
 
     def update(self, item: T) -> None:
         for i, existing in enumerate(self._items):
-            if hasattr(existing, 'id') and hasattr(item, 'id') and existing.id == item.id:
+            if hasattr(existing, "id") and hasattr(item, "id") and existing.id == item.id:
                 self._items[i] = item
                 self._save()
                 return
-        raise ValueError("Элемент для обновления не найден")
+        raise ValueError("Элемент не найден")
 
     def delete(self, item: T) -> None:
-        self._items = [i for i in self._items if getattr(i, 'id', None) != getattr(item, 'id', None)]
+        self._items = [i for i in self._items if getattr(i, "id", None) != getattr(item, "id", None)]
         self._save()
 
 
 class UserRepository(IUserRepository):
-    def __init__(self, filename: str = 'users.pkl'):
+    def __init__(self, filename: str = "users.pkl"):
         self._repo = DataRepository[User](filename)
 
     def get_all(self) -> Sequence[User]:
@@ -228,8 +225,8 @@ class UserRepository(IUserRepository):
         return self._repo.get_by_id(id)
 
     def add(self, user: User) -> None:
-        # Хешируем пароль перед сохранением если он ещё не в формате salt$hash
-        if user.password and '$' not in user.password:
+        # Хеширует пароль перед сохранением если он ещё не в формате salt$hash
+        if user.password and "$" not in user.password:
             user.password = hash_password(user.password)
         if user.id is None:
             max_id = max((u.id for u in self._repo.get_all()), default=0)
@@ -238,7 +235,7 @@ class UserRepository(IUserRepository):
 
     def update(self, user: User) -> None:
         # Если передан открытый пароль, хешируем
-        if user.password and '$' not in user.password:
+        if user.password and "$" not in user.password:
             user.password = hash_password(user.password)
         self._repo.update(user)
 
@@ -268,8 +265,8 @@ class IAuthService(ABC):
 
 
 class AuthService(IAuthService):
-    """Автоматическая авторизация через файл сессии."""
-    SESSION_FILE = 'session.pkl'
+    '''Авторизация через файл сессии'''
+    SESSION_FILE = "session.pkl"
 
     def __init__(self, user_repository: IUserRepository):
         self._user_repo = user_repository
@@ -279,7 +276,7 @@ class AuthService(IAuthService):
     def _load_session(self) -> None:
         if os.path.exists(self.SESSION_FILE):
             try:
-                with open(self.SESSION_FILE, 'rb') as f:
+                with open(self.SESSION_FILE, "rb") as f:
                     user_id = pickle.load(f)
                     self._current_user = self._user_repo.get_by_id(user_id)
             except Exception:
@@ -287,7 +284,7 @@ class AuthService(IAuthService):
 
     def _save_session(self) -> None:
         if self._current_user:
-            with open(self.SESSION_FILE, 'wb') as f:
+            with open(self.SESSION_FILE, "wb") as f:
                 pickle.dump(self._current_user.id, f)
         else:
             try:
@@ -314,54 +311,54 @@ class AuthService(IAuthService):
 
 
 def demonstrate() -> None:
-    # Удаляем предыдущие файлы для чистоты
-    for f in ('users.pkl', 'session.pkl'):
+    '''Удаляем предыдущие файлы'''
+    for f in ("users.pkl", "session.pkl"):
         if os.path.exists(f):
             os.remove(f)
 
-    print("===СИСТЕМА АВТОРИЗАЦИИ===\n")
+    print("-------------------СИСТЕМА АВТОРИЗАЦИИ------------------\n")
 
     repo = UserRepository()
     auth = AuthService(repo)
 
-    print("1. Добавление пользователей:")
-    u1 = User(id=None, name="Иван Иванов", login="ivan", password="qwerty", email="ivan@mail.ru")
-    u2 = User(id=None, name="Петр Петров", login="petr", password="12345", address="ул. Ленина, 1")
+    '''Добавление пользователей'''
+    u1 = User(id=None, name="Алеся", login="login", password="password", email="email@gmail.com")
+    u2 = User(id=None, name="Не бей", login="ZACHOT", password="228611", address="ул. Невского, 14")
     repo.add(u1)
     repo.add(u2)
-    print("   Пользователи добавлены.")
 
-    print("\n2. Сортировка пользователей по имени:")
+    print("\nСортировка пользователей по имени:")
     for u in sorted(repo.get_all()):
-        print(f"   {u.id}: {u.name} ({u.login})")
+        print(f"{u.id}: {u.name} ({u.login})")
 
-    print("\n3. Редактирование пользователя (меняем email):")
-    u1.email = "ivan_updated@mail.ru"
+    print("\nРедактирование email:")
+    u1.email = "neemail@gmail.com"
     repo.update(u1)
-    print(f"   Email Ивана изменён на {u1.email}")
+    print(f"Email изменён на {u1.email}")
 
-    print("\n4. Авторизация пользователя 'ivan' с верным паролем:")
-    auth.sign_in(User(id=-1, name="", login="ivan", password="vkblfkvjk"))
+    print("\nАвторизация пользователя:")
+    auth.sign_in(User(id=None, name="Алеся", login="login", password="password"))
     if auth.is_authorized():
         cur = auth.current_user()
-        print(f"   Успешно. Текущий: {cur.name} (id={cur.id})")
+        print(f"Успешно. Пользователь: {cur.name} (id={cur.id})")
     else:
-        print("   Ошибка авторизации.")
+        print("Ошибка авторизации.")
 
-    print("\n5.автоавторизация:")
+    print("\nАвторизация автоматически:")
     auth2 = AuthService(repo)
     if auth2.is_authorized():
-        print(f"   Авторизован автоматически: {auth2.current_user().name}")
+        print(f"Авторизован автоматически: {auth2.current_user().name}")
 
-    print("\n6. Смена пользователя:")
+
+    print("\n\nСмена пользователя:")
     if auth2.is_authorized():
         auth2.sign_out(auth2.current_user())
-    auth2.sign_in(User(id=-1, name="", login="petr", password="123945"))
+    auth2.sign_in(User(id=None, name="", login="ZACHOT", password="228611"))
     if auth2.is_authorized():
-        print(f"   Теперь текущий: {auth2.current_user().name}")
+        print(f"Успешно. Пользователь: {auth2.current_user().name}")
 
-    print("\n7. Поиск по логину 'ivan':")
-    found = repo.get_by_login("ivan")
+    print("\n7. Поиск по логину:")
+    found = repo.get_by_login("ZACHOT")
     print(f"   Найден: {found.name if found else 'нет'}")
 
 
