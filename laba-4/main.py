@@ -29,13 +29,9 @@
 EventHandler<PropertyChangingEventArgs> до изменения значения свойства с возможностью отменить изменение
 '''
 
-
-
-
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional, TypeVar, Generic
-
 
 # Базовые типы для событий
 TEventArgs = TypeVar('TEventArgs')
@@ -95,7 +91,7 @@ class PropertyChangingEventArgs(EventArgs):
         self.property_name = property_name
         self.old_value = old_value
         self.new_value = new_value
-        self.can_change = True   #изменение разрешено (по умолчанию)
+        self.can_change = True  # изменение разрешено (по умолчанию)
 
 
 # Конкретные обработчики событий
@@ -110,12 +106,27 @@ class ValidatingPropertyChangingHandler(EventHandler[PropertyChangingEventArgs])
     '''Валидация с возможностью отмены'''
 
     def __init__(self, forbidden_values: Optional[List[Any]] = None) -> None:
-        self.forbidden_values = forbidden_values or []
+        self.forbidden_values = forbidden_values if forbidden_values is not None else []
 
     def handle(self, sender: object, args: PropertyChangingEventArgs) -> None:
-        if args.new_value in self.forbidden_values:
-            print(f"Изменение свойства '{args.property_name}' на {args.new_value} запрещено.")
-            args.can_change = False
+        new_val = args.new_value
+
+        for item in self.forbidden_values:
+
+            if not isinstance(item, tuple) and new_val == item:  # Попадание
+                print(f"Изменение свойств '{args.property_name}' на {new_val}")
+                args.can_change = False
+                return
+
+            if isinstance(item, tuple) and len(item) == 2:  # Попадание
+                try:
+                    low, high = item
+                    if low <= new_val <= high:
+                        print(f"Изменение свойства '{args.property_name}' на {new_val} запрещено [{low}, {high}]).")
+                        args.can_change = False
+                        return
+                except TypeError:
+                    pass
 
 
 # Базовый класс для моделей с поддержкой событий изменения свойств
@@ -227,10 +238,9 @@ class Product(PropertyChangeNotifier):
 
 
 def test_events() -> None:
-
     console_handler = ConsolePropertyChangedHandler()
-    year_of_birth_validator = ValidatingPropertyChangingHandler(forbidden_values=[-5, -10])
-    price_validator = ValidatingPropertyChangingHandler(forbidden_values=[-100.0, -50.0])
+    year_of_birth_validator = ValidatingPropertyChangingHandler(forbidden_values=[(2000, 2011)])
+    price_validator = ValidatingPropertyChangingHandler(forbidden_values=[0.0])
 
     person = Person("Иван", 1997, "ivan@gooloogooloo.com")
     product = Product("Офисный компьютер", 30000.0, 10)
@@ -244,7 +254,7 @@ def test_events() -> None:
     print("Изменение свойств Person")
     print(f"До: {person}")
     person.year_of_birth = 1999
-    person.year_of_birth = -5
+    person.year_of_birth = 2007
     person.name = "Дмитрий"
     person.email = "OTCHISLY@gooloogooloo.com"
     print(f"После: {person}")
@@ -252,7 +262,7 @@ def test_events() -> None:
     print("\nИзменение свойств Product")
     print(f"До: {product}")
     product.price = 90000.0
-    product.price = -100.0
+    product.price = 0.0
     product.quantity = 5
     product.title = "Игровой компьютер (2 ядра 2 гига, игровая видеокарта)"
     print(f"После: {product}")
@@ -267,7 +277,6 @@ def test_events() -> None:
 
 if __name__ == "__main__":
     test_events()
-
 
 
 
