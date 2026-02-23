@@ -58,8 +58,19 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence, List, TypeVar, Generic
 
 
-class PasswordHasher:
+class IHasher(ABC):
+    @staticmethod
+    @abstractmethod
+    def hash(password: str) -> str:
+        pass
 
+    @staticmethod
+    @abstractmethod
+    def verify(plain_password: str, hashed: str) -> bool:
+        pass
+
+
+class PasswordHasher(IHasher):
     @staticmethod
     def hash(password: str) -> str:
         salt = os.urandom(16).hex()
