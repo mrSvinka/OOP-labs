@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence, List, TypeVar, Generic
 
 
-class IHasher(ABC):
+class Hasher(ABC):
     @staticmethod
     @abstractmethod
     def hash(password: str) -> str:
@@ -70,7 +70,7 @@ class IHasher(ABC):
         pass
 
 
-class PasswordHasher(IHasher):
+class PasswordHasher(Hasher):
     @staticmethod
     def hash(password: str) -> str:
         salt = os.urandom(16).hex()
