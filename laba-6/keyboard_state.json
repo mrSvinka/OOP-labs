@@ -1,0 +1,29 @@
+{
+  "keymap": {
+    "a": {
+      "type": "PrintChar",
+      "char": "a"
+    },
+    "b": {
+      "type": "PrintChar",
+      "char": "b"
+    },
+    "c": {
+      "type": "PrintChar",
+      "char": "c"
+    },
+    "d": {
+      "type": "PrintChar",
+      "char": "d"
+    },
+    "ctrl++": {
+      "type": "VolumeUp"
+    },
+    "ctrl+-": {
+      "type": "VolumeDown"
+    },
+    "ctrl+p": {
+      "type": "MediaPlayer"
+    }
+  }
+}

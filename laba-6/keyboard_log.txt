@@ -1,0 +1,17 @@
+----------Привязки по умолчанию------------
+
+---------------Демонстрация----------------
+a
+ab
+abc
+ab
+a
+ab
+Volume increased +20%
+Volume decreased -20%
+Media player launched
+abd
+ab
+Media player closed
+
+-------Текущие привязки сохранены---------
