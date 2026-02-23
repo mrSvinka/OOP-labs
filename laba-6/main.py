@@ -49,7 +49,6 @@ Keyboard, KeyCommand, VolumeUpCommand, VolumeDownCommand, MediaPlayerCommand, Ke
 
 
 
-
 from __future__ import annotations
 import json
 import os
@@ -178,30 +177,69 @@ class Keyboard:
             self._bindings[key] = cmd
 
 
-class KeyboardStateSaver:
-    def __init__(self, filename="keyboard_state.json", rename=None):
-        self.filename = filename
-        self.rename = rename or {}
+class KeyboardMemento:
+    def __init__(self, bindings_snapshot: Dict[str, Dict[str, Any]]):
+        self._bindings = bindings_snapshot
 
-    def save(self, keyboard: Keyboard):
-        snap = keyboard.get_snapshot()
-        if self.rename: # переименование ключей
-            data = {"keymap": snap}  # сразу нужное имя
-        else:
-            data = {"bindings": snap}
-        with open(self.filename, "w") as f:
-            json.dump(data, f, indent=2)
+    def get_bindings(self) -> Dict[str, Dict[str, Any]]:
+        return self._bindings.copy()
+
+
+class KeyboardStateEncoder:
+    def __init__(self, rename_map: Optional[Dict[str, str]] = None,
+                 exclude: Optional[List[str]] = None):
+        self.rename_map = rename_map or {}
+        self.exclude = exclude or []
+
+    def encode(self, keyboard: Keyboard) -> Dict[str, Any]:
+        '''Возвращает словарь для сериализации'''
+        raw_bindings = keyboard.get_snapshot()   #сырой снимок привязок
+        data = {"bindings": raw_bindings} # в поле по умолчанию
+
+        # Применяем исключение полей
+        for field in self.exclude:
+            data.pop(field, None)
+
+        # Применяем переименование полей
+        for old, new in self.rename_map.items():
+            if old in data:
+                data[new] = data.pop(old)
+
+        return data
+
+    def decode(self, data: Dict[str, Any], output: OutputManager) -> KeyboardMemento:
+        """Восстанавливает снимок из словаря, применяя обратные преобразования."""
+        # Обратное переименование (инвертируем rename_map)
+        reverse_rename = {v: k for k, v in self.rename_map.items()}
+        for new, old in reverse_rename.items():
+            if new in data:
+                data[old] = data.pop(new)
+
+        # Исключённые поля уже отсутствуют, просто берём bindings
+        bindings = data.get("bindings", {})
+        return KeyboardMemento(bindings)
+
+
+class KeyboardStateSaver:
+    '''Отвечает в JSON'''
+    def __init__(self, encoder: KeyboardStateEncoder, filename: str = "keyboard_state.json"):
+        self.encoder = encoder
+        self.filename = filename
+
+    def save(self, keyboard: Keyboard) -> None:
+        '''Сохраняет клавиатуры в файл'''
+        data = self.encoder.encode(keyboard)
+        with open(self.filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
     def load(self, keyboard: Keyboard) -> bool:
+        '''Загружает состояние из файла и восстанавливает привязки'''
         if not os.path.exists(self.filename):
             return False
-        with open(self.filename) as f:
+        with open(self.filename, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if self.rename:
-            snap = data.get("keymap", {})
-        else:
-            snap = data.get("bindings", {})
-        keyboard.restore_snapshot(snap)
+        memento = self.encoder.decode(data, keyboard._out)
+        keyboard.restore_snapshot(memento.get_bindings())
         return True
 
 
@@ -209,8 +247,9 @@ def main():
     out = OutputManager()
     kb = Keyboard(out)
 
-    # Загружаем, если есть
-    saver = KeyboardStateSaver(rename={"bindings": "keymap"})
+    encoder = KeyboardStateEncoder(rename_map={"bindings": "keymap"})
+    saver = KeyboardStateSaver(encoder, "keyboard_state.json")
+
     if saver.load(kb):
         out.print_message("----------------Загружено------------------")
     else:
@@ -238,9 +277,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
