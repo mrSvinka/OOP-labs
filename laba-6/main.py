@@ -52,17 +52,18 @@ Keyboard, KeyCommand, VolumeUpCommand, VolumeDownCommand, MediaPlayerCommand, Ke
 from __future__ import annotations
 import json
 import os
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 
 class OutputManager:
     '''Вывод в консоль и файл'''
     def __init__(self, filename: str = "keyboard_log.txt"):
-        self._buffer = []
+        self._buffer = []   # список символов текущей строки
         self._filename = filename
         open(filename, "w").close()
 
-    def _write(self, text: str):
+    def _write(self, text: str):    # печатает в консоль и файл
         print(text)
         with open(self._filename, "a", encoding="utf-8") as f:
             f.write(text + "\n")
@@ -71,18 +72,23 @@ class OutputManager:
         self._buffer.append(ch)
         self._write("".join(self._buffer))
 
-    def remove_last_char(self):
+    def remove_last_char(self):     # удалить последний символ из буфера
         if self._buffer:
             self._buffer.pop()
         self._write("".join(self._buffer))
 
-    def print_message(self, msg: str):
+    def print_message(self, msg: str):  # сообщение
         self._write(msg)
 
 
-class Command:
-    def execute(self): raise NotImplementedError
-    def undo(self): raise NotImplementedError
+class Command(ABC):
+    @abstractmethod
+    def execute(self):
+        pass
+
+    @abstractmethod
+    def undo(self):
+        pass
 
 
 class PrintCharCommand(Command):
@@ -90,53 +96,71 @@ class PrintCharCommand(Command):
         self.char = char
         self.out = out
 
-    def execute(self): self.out.add_char(self.char)
-    def undo(self): self.out.remove_last_char()
+    def execute(self):
+        self.out.add_char(self.char)
+
+    def undo(self):
+        self.out.remove_last_char()
 
 
 class VolumeUpCommand(Command):
-    def __init__(self, out: OutputManager): self.out = out
-    def execute(self): self.out.print_message("Volume increased +20%")
-    def undo(self): self.out.print_message("Volume decreased -20%")
+    def __init__(self, out: OutputManager):
+        self.out = out
+
+    def execute(self):
+        self.out.print_message("Volume increased +20%")
+
+    def undo(self):
+        self.out.print_message("Volume decreased -20%")
 
 
 class VolumeDownCommand(Command):
-    def __init__(self, out: OutputManager): self.out = out
-    def execute(self): self.out.print_message("Volume decreased -20%")
-    def undo(self): self.out.print_message("Volume increased +20%")
+    def __init__(self, out: OutputManager):
+        self.out = out
+
+    def execute(self):
+        self.out.print_message("Volume decreased -20%")
+
+    def undo(self):
+        self.out.print_message("Volume increased +20%")
 
 
 class MediaPlayerCommand(Command):
-    def __init__(self, out: OutputManager): self.out = out
-    def execute(self): self.out.print_message("Media player launched")
-    def undo(self): self.out.print_message("Media player closed")
+    def __init__(self, out: OutputManager):
+        self.out = out
+
+    def execute(self):
+        self.out.print_message("Media player launched")
+
+    def undo(self):
+        self.out.print_message("Media player closed")
 
 
 class Keyboard:
     def __init__(self, out: OutputManager):
-        self._out = out
-        self._bindings = {}
-        self._history = []
-        self._redo = []
+        self._out = out      # менеджер вывода
+        self._bindings = {}  # словарь
+        self._history = []   # стек выполненных команд
+        self._redo = []      # стек отменённых команд
 
-    def bind(self, key: str, cmd: Command):
+    def bind(self, key: str, cmd: Command):     # привязать команду к клавише
         self._bindings[key] = cmd
 
     def press(self, key: str):
         if key not in self._bindings:
             self._out.print_message(f"<{key} не связан>")
             return
-        cmd = self._bindings[key]
-        cmd.execute()
-        self._history.append(cmd)
-        self._redo.clear()
+        cmd = self._bindings[key]  # получить команду
+        cmd.execute()              # выполнить
+        self._history.append(cmd)  # добавить в историю
+        self._redo.clear()         # очистка
 
     def undo(self):
         if not self._history:
             self._out.print_message("<ничего нельзя отменить>")
             return
-        cmd = self._history.pop()
-        cmd.undo()
+        cmd = self._history.pop()  # взять последнюю команду
+        cmd.undo()                 # отменить
         self._redo.append(cmd)
 
     def redo(self):
@@ -144,8 +168,8 @@ class Keyboard:
             self._out.print_message("<ничего переделывать не нужно>")
             return
         cmd = self._redo.pop()
-        cmd.execute()
-        self._history.append(cmd)
+        cmd.execute()               # выполнить сново
+        self._history.append(cmd)   # добавить обратно
 
     def get_snapshot(self):
         snap = {}
@@ -173,7 +197,7 @@ class Keyboard:
             elif t == "MediaPlayer":
                 cmd = MediaPlayerCommand(self._out)
             else:
-                continue
+                continue # неизвестный тип пропускаем
             self._bindings[key] = cmd
 
 
@@ -188,13 +212,13 @@ class KeyboardMemento:
 class KeyboardStateEncoder:
     def __init__(self, rename_map: Optional[Dict[str, str]] = None,
                  exclude: Optional[List[str]] = None):
-        self.rename_map = rename_map or {}
-        self.exclude = exclude or []
+        self.rename_map = rename_map or {}  # словарь для переименования полей
+        self.exclude = exclude or []        # список полей для исключения
 
     def encode(self, keyboard: Keyboard) -> Dict[str, Any]:
         '''Возвращает словарь для сериализации'''
-        raw_bindings = keyboard.get_snapshot()   #сырой снимок привязок
-        data = {"bindings": raw_bindings} # в поле по умолчанию
+        raw_bindings = keyboard.get_snapshot()
+        data = {"bindings": raw_bindings}
 
         # Применяем исключение полей
         for field in self.exclude:
@@ -208,14 +232,13 @@ class KeyboardStateEncoder:
         return data
 
     def decode(self, data: Dict[str, Any], output: OutputManager) -> KeyboardMemento:
-        """Восстанавливает снимок из словаря, применяя обратные преобразования."""
-        # Обратное переименование (инвертируем rename_map)
+        """Восстанавливает из словаря, применяя обратные преобразования"""
         reverse_rename = {v: k for k, v in self.rename_map.items()}
         for new, old in reverse_rename.items():
             if new in data:
                 data[old] = data.pop(new)
 
-        # Исключённые поля уже отсутствуют, просто берём bindings
+        # Исключённые поля уже отсутствуют
         bindings = data.get("bindings", {})
         return KeyboardMemento(bindings)
 
