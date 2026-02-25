@@ -50,35 +50,35 @@
  - авторматическая авторизация при повторном заходе в программу
 '''
 
+
 import os
 import pickle
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Sequence, List, TypeVar, Generic
+from typing import Optional, Sequence, List, TypeVar, Generic, Protocol
+
+
+class HasId(Protocol):
+    id: int
+T = TypeVar('T', bound=HasId)
 
 
 class Hasher(ABC):
-    @staticmethod
     @abstractmethod
-    def hash(password: str) -> str:
-        pass
+    def hash(self, password: str) -> str: ...
 
-    @staticmethod
     @abstractmethod
-    def verify(plain_password: str, hashed: str) -> bool:
-        pass
+    def verify(self, plain_password: str, hashed: str) -> bool: ...
 
 
 class PasswordHasher(Hasher):
-    @staticmethod
-    def hash(password: str) -> str:
+    def hash(self, password: str) -> str:
         salt = os.urandom(16).hex()
         hash_obj = hashlib.sha256((salt + password).encode())
         return f"{salt}${hash_obj.hexdigest()}"
 
-    @staticmethod
-    def verify(plain_password: str, hashed: str) -> bool:
+    def verify(self, plain_password: str, hashed: str) -> bool:
         try:
             salt, hash_value = hashed.split("$")
         except ValueError:
@@ -101,8 +101,6 @@ class User:
         '''Для сортировки по имени'''
         return self.name < other.name
 
-
-T = TypeVar('T')  # Интерфейсы репозиториев
 
 class IDataRepository(ABC, Generic[T]):
     @abstractmethod
@@ -150,32 +148,33 @@ class DataRepository(IDataRepository[T], Generic[T]):
 
     def get_by_id(self, id: int) -> Optional[T]:
         for item in self._items:
-            if getattr(item, "id", None) == id:
+            if item.id == id:
                 return item
         return None
 
     def add(self, item: T) -> None:
-        if hasattr(item, "id") and item.id is not None and self.get_by_id(item.id):
+        if item.id is not None and self.get_by_id(item.id):
             raise ValueError(f"Элемент с id {item.id} уже имеется")
         self._items.append(item)
         self._save()
 
     def update(self, item: T) -> None:
         for i, existing in enumerate(self._items):
-            if hasattr(existing, "id") and hasattr(item, "id") and existing.id == item.id:
+            if existing.id == item.id:
                 self._items[i] = item
                 self._save()
                 return
         raise ValueError("Элемент не найден")
 
     def delete(self, item: T) -> None:
-        self._items = [i for i in self._items if getattr(i, "id", None) != getattr(item, "id", None)]
+        self._items = [i for i in self._items if i.id != item.id]
         self._save()
 
 
 class UserRepository(IUserRepository):
-    def __init__(self, filename: str = "users.pkl"):
+    def __init__(self, filename: str = "users.pkl", hasher: Hasher = None):
         self._repo = DataRepository[User](filename)
+        self._hasher = hasher if hasher is not None else PasswordHasher()
 
     def get_all(self) -> Sequence[User]:
         return self._repo.get_all()
@@ -186,7 +185,7 @@ class UserRepository(IUserRepository):
     def add(self, user: User) -> None:
         # Хеширует пароль перед сохранением, если он ещё не в формате salt$hash
         if user.password and "$" not in user.password:
-            user.password = PasswordHasher.hash(user.password)
+            user.password = self._hasher.hash(user.password)
         if user.id is None:
             max_id = max((u.id for u in self._repo.get_all()), default=0)
             user.id = max_id + 1
@@ -195,7 +194,7 @@ class UserRepository(IUserRepository):
     def update(self, user: User) -> None:
         # Если передан открытый пароль, хешируем
         if user.password and "$" not in user.password:
-            user.password = PasswordHasher.hash(user.password)
+            user.password = self._hasher.hash(user.password)
         self._repo.update(user)
 
     def delete(self, user: User) -> None:
@@ -208,7 +207,6 @@ class UserRepository(IUserRepository):
         return None
 
 
-# Интерфейс сервиса авторизации
 class IAuthService(ABC):
     @abstractmethod
     def sign_in(self, user: User) -> None: ...
@@ -227,8 +225,9 @@ class AuthService(IAuthService):
     '''Авторизация через файл сессии'''
     SESSION_FILE = "session.pkl"
 
-    def __init__(self, user_repository: IUserRepository):
+    def __init__(self, user_repository: IUserRepository, hasher: Hasher = None):
         self._user_repo = user_repository
+        self._hasher = hasher if hasher is not None else PasswordHasher()
         self._current_user: Optional[User] = None
         self._load_session()
 
@@ -253,7 +252,7 @@ class AuthService(IAuthService):
 
     def sign_in(self, user: User) -> None:
         stored = self._user_repo.get_by_login(user.login)
-        if stored and PasswordHasher.verify(user.password, stored.password):
+        if stored and self._hasher.verify(user.password, stored.password):
             self._current_user = stored
             self._save_session()
 
