@@ -24,6 +24,14 @@
     },
     "ctrl+p": {
       "type": "MediaPlayer"
+    },
+    "x": {
+      "type": "Echo",
+      "message": "новое"
+    },
+    "y": {
+      "type": "Echo",
+      "message": "очень новое"
     }
   }
 }

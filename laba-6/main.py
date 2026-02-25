@@ -47,23 +47,22 @@ Keyboard, KeyCommand, VolumeUpCommand, VolumeDownCommand, MediaPlayerCommand, Ke
 Обратите внимание, что классы команд не должны зависеть от класса виртуальной клавиатуры
 '''
 
-
-
 from __future__ import annotations
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 
 class OutputManager:
     '''Вывод в консоль и файл'''
+
     def __init__(self, filename: str = "keyboard_log.txt"):
-        self._buffer = []   # список символов текущей строки
+        self._buffer = []
         self._filename = filename
         open(filename, "w").close()
 
-    def _write(self, text: str):    # печатает в консоль и файл
+    def _write(self, text: str):
         print(text)
         with open(self._filename, "a", encoding="utf-8") as f:
             f.write(text + "\n")
@@ -72,16 +71,39 @@ class OutputManager:
         self._buffer.append(ch)
         self._write("".join(self._buffer))
 
-    def remove_last_char(self):     # удалить последний символ из буфера
+    def remove_last_char(self):
         if self._buffer:
             self._buffer.pop()
         self._write("".join(self._buffer))
 
-    def print_message(self, msg: str):  # сообщение
+    def print_message(self, msg: str):
         self._write(msg)
 
 
 class Command(ABC):
+    _registry: Dict[str, Type[Command]] = {}
+
+    def __init_subclass__(cls, **kwargs):  # автоматическая регистрация
+        """Автоматическая регистрация подкласса по имени класса."""
+        super().__init_subclass__(**kwargs)
+        type_name = getattr(cls, 'command_type', cls.__name__)
+        Command._registry[type_name] = cls
+
+    @classmethod
+    def get_class(cls, type_name: str) -> Optional[Type[Command]]:  # получить класс по имени
+        return cls._registry.get(type_name)
+
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]:  # превратить в словарь
+        """Возвращает словарь для сериализации команды"""
+        pass
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> Command:  # создать из словаря
+        """Создаёт команду из словаря."""
+        pass
+
     @abstractmethod
     def execute(self):
         pass
@@ -92,9 +114,18 @@ class Command(ABC):
 
 
 class PrintCharCommand(Command):
+    command_type = "PrintChar"
+
     def __init__(self, char: str, out: OutputManager):
         self.char = char
         self.out = out
+
+    def to_dict(self) -> Dict[str, Any]:  # превратить в словарь
+        return {"type": self.command_type, "char": self.char}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> PrintCharCommand:  # создать из словаря
+        return cls(data["char"], out)
 
     def execute(self):
         self.out.add_char(self.char)
@@ -104,8 +135,17 @@ class PrintCharCommand(Command):
 
 
 class VolumeUpCommand(Command):
+    command_type = "VolumeUp"
+
     def __init__(self, out: OutputManager):
         self.out = out
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.command_type}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> VolumeUpCommand:
+        return cls(out)
 
     def execute(self):
         self.out.print_message("Volume increased +20%")
@@ -115,8 +155,17 @@ class VolumeUpCommand(Command):
 
 
 class VolumeDownCommand(Command):
+    command_type = "VolumeDown"
+
     def __init__(self, out: OutputManager):
         self.out = out
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.command_type}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> VolumeDownCommand:
+        return cls(out)
 
     def execute(self):
         self.out.print_message("Volume decreased -20%")
@@ -126,8 +175,17 @@ class VolumeDownCommand(Command):
 
 
 class MediaPlayerCommand(Command):
+    command_type = "MediaPlayer"
+
     def __init__(self, out: OutputManager):
         self.out = out
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.command_type}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> MediaPlayerCommand:
+        return cls(out)
 
     def execute(self):
         self.out.print_message("Media player launched")
@@ -136,31 +194,52 @@ class MediaPlayerCommand(Command):
         self.out.print_message("Media player closed")
 
 
+class EchoCommand(Command):
+    command_type = "Echo"
+
+    def __init__(self, message: str, out: OutputManager):
+        self.message = message
+        self.out = out
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.command_type, "message": self.message}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], out: OutputManager) -> EchoCommand:
+        return cls(data["message"], out)
+
+    def execute(self):
+        self.out.print_message(self.message)
+
+    def undo(self):
+        self.out.print_message(f"Undo: {self.message}")
+
+
 class Keyboard:
     def __init__(self, out: OutputManager):
-        self._out = out      # менеджер вывода
-        self._bindings = {}  # словарь
-        self._history = []   # стек выполненных команд
-        self._redo = []      # стек отменённых команд
+        self._out = out
+        self._bindings = {}
+        self._history = []
+        self._redo = []
 
-    def bind(self, key: str, cmd: Command):     # привязать команду к клавише
+    def bind(self, key: str, cmd: Command):
         self._bindings[key] = cmd
 
     def press(self, key: str):
         if key not in self._bindings:
             self._out.print_message(f"<{key} не связан>")
             return
-        cmd = self._bindings[key]  # получить команду
-        cmd.execute()              # выполнить
-        self._history.append(cmd)  # добавить в историю
-        self._redo.clear()         # очистка
+        cmd = self._bindings[key]
+        cmd.execute()
+        self._history.append(cmd)
+        self._redo.clear()
 
     def undo(self):
         if not self._history:
             self._out.print_message("<ничего нельзя отменить>")
             return
-        cmd = self._history.pop()  # взять последнюю команду
-        cmd.undo()                 # отменить
+        cmd = self._history.pop()
+        cmd.undo()
         self._redo.append(cmd)
 
     def redo(self):
@@ -168,37 +247,23 @@ class Keyboard:
             self._out.print_message("<ничего переделывать не нужно>")
             return
         cmd = self._redo.pop()
-        cmd.execute()               # выполнить сново
-        self._history.append(cmd)   # добавить обратно
+        cmd.execute()
+        self._history.append(cmd)
 
     def get_snapshot(self):
         snap = {}
         for key, cmd in self._bindings.items():
-            if isinstance(cmd, PrintCharCommand):
-                snap[key] = {"type": "PrintChar", "char": cmd.char}
-            elif isinstance(cmd, VolumeUpCommand):
-                snap[key] = {"type": "VolumeUp"}
-            elif isinstance(cmd, VolumeDownCommand):
-                snap[key] = {"type": "VolumeDown"}
-            elif isinstance(cmd, MediaPlayerCommand):
-                snap[key] = {"type": "MediaPlayer"}
+            snap[key] = cmd.to_dict()
         return snap
 
     def restore_snapshot(self, snap: dict):
         self._bindings.clear()
         for key, desc in snap.items():
-            t = desc.get("type")
-            if t == "PrintChar":
-                cmd = PrintCharCommand(desc["char"], self._out)
-            elif t == "VolumeUp":
-                cmd = VolumeUpCommand(self._out)
-            elif t == "VolumeDown":
-                cmd = VolumeDownCommand(self._out)
-            elif t == "MediaPlayer":
-                cmd = MediaPlayerCommand(self._out)
-            else:
-                continue # неизвестный тип пропускаем
-            self._bindings[key] = cmd
+            cmd_type = desc.get("type")
+            cmd_class = Command.get_class(cmd_type)
+            if cmd_class:
+                cmd = cmd_class.from_dict(desc, self._out)
+                self._bindings[key] = cmd
 
 
 class KeyboardMemento:
@@ -212,19 +277,16 @@ class KeyboardMemento:
 class KeyboardStateEncoder:
     def __init__(self, rename_map: Optional[Dict[str, str]] = None,
                  exclude: Optional[List[str]] = None):
-        self.rename_map = rename_map or {}  # словарь для переименования полей
-        self.exclude = exclude or []        # список полей для исключения
+        self.rename_map = rename_map or {}
+        self.exclude = exclude or []
 
     def encode(self, keyboard: Keyboard) -> Dict[str, Any]:
-        '''Возвращает словарь для сериализации'''
         raw_bindings = keyboard.get_snapshot()
         data = {"bindings": raw_bindings}
 
-        # Применяем исключение полей
         for field in self.exclude:
             data.pop(field, None)
 
-        # Применяем переименование полей
         for old, new in self.rename_map.items():
             if old in data:
                 data[new] = data.pop(old)
@@ -232,31 +294,26 @@ class KeyboardStateEncoder:
         return data
 
     def decode(self, data: Dict[str, Any], output: OutputManager) -> KeyboardMemento:
-        """Восстанавливает из словаря, применяя обратные преобразования"""
         reverse_rename = {v: k for k, v in self.rename_map.items()}
         for new, old in reverse_rename.items():
             if new in data:
                 data[old] = data.pop(new)
 
-        # Исключённые поля уже отсутствуют
         bindings = data.get("bindings", {})
         return KeyboardMemento(bindings)
 
 
 class KeyboardStateSaver:
-    '''Отвечает в JSON'''
     def __init__(self, encoder: KeyboardStateEncoder, filename: str = "keyboard_state.json"):
         self.encoder = encoder
         self.filename = filename
 
     def save(self, keyboard: Keyboard) -> None:
-        '''Сохраняет клавиатуры в файл'''
         data = self.encoder.encode(keyboard)
         with open(self.filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     def load(self, keyboard: Keyboard) -> bool:
-        '''Загружает состояние из файла и восстанавливает привязки'''
         if not os.path.exists(self.filename):
             return False
         with open(self.filename, "r", encoding="utf-8") as f:
@@ -285,8 +342,11 @@ def main():
         kb.bind("ctrl+-", VolumeDownCommand(out))
         kb.bind("ctrl+p", MediaPlayerCommand(out))
 
+    kb.bind("x", EchoCommand("новое", out))
+    kb.bind("y", EchoCommand("очень новое", out))
+
     out.print_message("\n---------------Демонстрация----------------")
-    for key in ["a", "b", "c", "undo", "undo", "redo", "ctrl++", "ctrl+-", "ctrl+p", "d", "undo", "undo"]:
+    for key in ["a", "b", "c", "x", "y", "undo", "undo", "redo", "ctrl++", "ctrl+-", "ctrl+p", "d", "undo", "undo"]:
         if key == "undo":
             kb.undo()
         elif key == "redo":
