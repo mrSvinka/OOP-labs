@@ -34,7 +34,7 @@ import inspect
 import random
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Dict, Optional, Callable, Type, Union, get_type_hints, List  ############# добавлен импорт List
+from typing import Any, Dict, Optional, Callable, Type, Union, get_type_hints, List
 import contextlib
 
 
